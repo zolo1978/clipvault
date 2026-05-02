@@ -30,8 +30,15 @@ pub async fn paste_clip(
 
     let result = do_paste(id, &state, &window).await;
 
-    state.is_pasting.store(false, Ordering::SeqCst);
     let _ = window.show();
+
+    // Delay resetting is_pasting to prevent monitor from re-capturing pasted content
+    let flag = state.is_pasting.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        flag.store(false, Ordering::SeqCst);
+    });
+
     result
 }
 
@@ -62,46 +69,31 @@ async fn do_paste(
         .hide()
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // 3. Wait for window hide to take effect
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    // 3. Wait for app focus switch
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-    // 4. Save current clipboard, set new text
+    // 4. Set clipboard to clip text
     let text_clone = text.clone();
-    let saved = tokio::task::spawn_blocking(move || {
-        let prev = read_clipboard_text();
-        if let Ok(mut cb) = arboard::Clipboard::new() {
-            let _ = cb.set_text(&text_clone);
-        }
-        prev
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        let mut cb = arboard::Clipboard::new()
+            .map_err(|e| AppError::Internal(format!("clipboard init: {e}")))?;
+        cb.set_text(&text_clone)
+            .map_err(|e| AppError::Internal(format!("clipboard set: {e}")))?;
+        Ok(())
     })
     .await
-    .map_err(|e| AppError::Internal(e.to_string()))?;
+    .map_err(|e| AppError::Internal(e.to_string()))??;
 
-    // 5. Wait for clipboard to be read by system
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    // 6. Simulate Cmd+V
-    simulate_paste()?;
-
-    // 7. Wait for target app to read the clipboard
+    // 5. Wait for clipboard to propagate
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    // 8. Restore previous clipboard content
-    if let Some(prev) = saved {
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Ok(mut cb) = arboard::Clipboard::new() {
-                let _ = cb.set_text(&prev);
-            }
-        })
-        .await;
-    }
+    // 6. Simulate Cmd+V
+    simulate_paste().await?;
+
+    // 7. Wait for target app to consume the paste
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     Ok(())
-}
-
-fn read_clipboard_text() -> Option<String> {
-    let mut cb = arboard::Clipboard::new().ok()?;
-    cb.get_text().ok()
 }
 
 #[tauri::command]
@@ -204,29 +196,39 @@ pub async fn reveal_path(
     Ok(())
 }
 
-fn simulate_paste() -> Result<(), AppError> {
-    tokio::task::block_in_place(|| {
-        use enigo::{Key, Keyboard, Settings};
-        let mut enigo = enigo::Enigo::new(&Settings::default())
-            .map_err(|e| AppError::Internal(format!("enigo init: {e}")))?;
-
+async fn simulate_paste() -> Result<(), AppError> {
+    tokio::task::spawn_blocking(|| {
         #[cfg(target_os = "macos")]
         {
-            use enigo::Direction;
-            enigo
-                .key(Key::Meta, Direction::Press)
-                .map_err(|e| AppError::Internal(format!("meta press: {e}")))?;
-            enigo
-                .key(Key::Unicode('v'), Direction::Click)
-                .map_err(|e| AppError::Internal(format!("v click: {e}")))?;
-            enigo
-                .key(Key::Meta, Direction::Release)
-                .map_err(|e| AppError::Internal(format!("meta release: {e}")))?;
+            use core_graphics::event::{CGEvent, CGEventTapLocation};
+            use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+            let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+                .map_err(|_| AppError::Internal("CGEventSource init failed".into()))?;
+
+            // kVK_Command = 0x37 (55), kVK_ANSI_V = 0x09 (9)
+            let event = CGEvent::new_keyboard_event(source.clone(), 55, true)
+                .map_err(|_| AppError::Internal("cmd down event failed".into()))?;
+            event.post(CGEventTapLocation::HID);
+
+            let event = CGEvent::new_keyboard_event(source.clone(), 9, true)
+                .map_err(|_| AppError::Internal("v down event failed".into()))?;
+            event.post(CGEventTapLocation::HID);
+
+            let event = CGEvent::new_keyboard_event(source.clone(), 9, false)
+                .map_err(|_| AppError::Internal("v up event failed".into()))?;
+            event.post(CGEventTapLocation::HID);
+
+            let event = CGEvent::new_keyboard_event(source, 55, false)
+                .map_err(|_| AppError::Internal("cmd up event failed".into()))?;
+            event.post(CGEventTapLocation::HID);
         }
 
         #[cfg(target_os = "windows")]
         {
-            use enigo::Direction;
+            use enigo::{Direction, Key, Keyboard, Settings};
+            let mut enigo = enigo::Enigo::new(&Settings::default())
+                .map_err(|e| AppError::Internal(format!("enigo init: {e}")))?;
             enigo
                 .key(Key::Control, Direction::Press)
                 .map_err(|e| AppError::Internal(format!("ctrl press: {e}")))?;
@@ -240,4 +242,6 @@ fn simulate_paste() -> Result<(), AppError> {
 
         Ok(())
     })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?
 }

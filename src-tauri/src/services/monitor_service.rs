@@ -103,15 +103,15 @@ async fn run_monitor_loop(
             _ = tokio::time::sleep(delay) => {}
         }
 
+        // Check is_pasting BEFORE touching NSPasteboard to avoid contention
+        if is_pasting.load(Ordering::SeqCst) {
+            continue;
+        }
+
         let clipboard_content = match read_clipboard() {
             Some(content) => content,
             None => continue,
         };
-
-        // Skip capture while paste operation is in progress
-        if is_pasting.load(Ordering::SeqCst) {
-            continue;
-        }
 
         let (content_type, content_bytes, hash) = match &clipboard_content {
             ClipboardContent::Text(t) => {
