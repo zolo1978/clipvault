@@ -41,34 +41,34 @@
 - [Node.js](https://nodejs.org/) 20+ 和 npm
 - Xcode Command Line Tools (`xcode-select --install`)
 
-## 快速开始
+## 安装
 
-### 克隆
+### 下载安装（推荐）
+
+1. 前往 [最新 Release](https://github.com/zolo1978/clipvault/releases/latest)
+2. 下载 `ClipVault_0.1.0_aarch64.dmg`
+3. 打开 DMG，将 ClipVault 拖到应用程序文件夹
+
+**macOS 安全提示**：首次打开时右键点击应用 → 选择「打开」→ 再次点击「打开」。或前往 `系统设置` → `隐私与安全性` → 点击「仍然允许」。
+
+### 从源码构建
 
 ```bash
 git clone https://github.com/zolo1978/clipvault.git
 cd clipvault
-```
-
-### 安装依赖
-
-```bash
 npm install
+npx tauri build
+# 构建产物在 src-tauri/target/release/bundle/
 ```
 
-### 开发模式
+## 开发
 
 ```bash
-npm run tauri dev
+git clone https://github.com/zolo1978/clipvault.git
+cd clipvault
+npm install
+npx tauri dev
 ```
-
-### 生产构建
-
-```bash
-npm run tauri build
-```
-
-构建产物（DMG 和 `.app`）在 `src-tauri/target/release/bundle/` 目录。
 
 ## 项目结构
 

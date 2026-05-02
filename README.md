@@ -41,34 +41,34 @@
 - [Node.js](https://nodejs.org/) 20+ and npm
 - Xcode Command Line Tools (`xcode-select --install`)
 
-## Getting Started
+## Installation
 
-### Clone
+### Download (Recommended)
+
+1. Go to the [Latest Release](https://github.com/zolo1978/clipvault/releases/latest)
+2. Download `ClipVault_0.1.0_aarch64.dmg`
+3. Open the DMG and drag ClipVault to Applications
+
+**macOS Gatekeeper bypass**: Right-click the app → Open → Open again. Or go to `System Settings` → `Privacy & Security` → `Open Anyway`.
+
+### Build from Source
 
 ```bash
 git clone https://github.com/zolo1978/clipvault.git
 cd clipvault
-```
-
-### Install dependencies
-
-```bash
 npm install
+npx tauri build
+# The app bundle will be in src-tauri/target/release/bundle/
 ```
 
-### Development
+## Development
 
 ```bash
-npm run tauri dev
+git clone https://github.com/zolo1978/clipvault.git
+cd clipvault
+npm install
+npx tauri dev
 ```
-
-### Build for production
-
-```bash
-npm run tauri build
-```
-
-The DMG and `.app` bundle will be in `src-tauri/target/release/bundle/`.
 
 ## Project Structure
 
