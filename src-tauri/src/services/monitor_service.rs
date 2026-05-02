@@ -19,6 +19,7 @@ pub struct MonitorService {
     config: Arc<RwLock<AppConfig>>,
     is_running: Arc<AtomicBool>,
     clips_captured: Arc<AtomicU64>,
+    is_pasting: Arc<AtomicBool>,
 }
 
 impl MonitorService {
@@ -26,6 +27,7 @@ impl MonitorService {
         db: Arc<Mutex<Connection>>,
         app_handle: AppHandle,
         config: Arc<RwLock<AppConfig>>,
+        is_pasting: Arc<AtomicBool>,
     ) -> Self {
         Self {
             db,
@@ -34,6 +36,7 @@ impl MonitorService {
             config,
             is_running: Arc::new(AtomicBool::new(false)),
             clips_captured: Arc::new(AtomicU64::new(0)),
+            is_pasting,
         }
     }
 
@@ -50,11 +53,12 @@ impl MonitorService {
         let config = self.config.clone();
         let is_running = self.is_running.clone();
         let clips_captured = self.clips_captured.clone();
+        let is_pasting = self.is_pasting.clone();
 
         is_running.store(true, Ordering::Relaxed);
 
         tauri::async_runtime::spawn(async move {
-            run_monitor_loop(db, app_handle, config, is_running, clips_captured, stop_rx).await;
+            run_monitor_loop(db, app_handle, config, is_running, clips_captured, stop_rx, is_pasting).await;
         });
 
         Ok(())
@@ -83,6 +87,7 @@ async fn run_monitor_loop(
     is_running: Arc<AtomicBool>,
     clips_captured: Arc<AtomicU64>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
+    is_pasting: Arc<AtomicBool>,
 ) {
     let mut last_hash: Option<String> = None;
 
@@ -102,6 +107,11 @@ async fn run_monitor_loop(
             Some(content) => content,
             None => continue,
         };
+
+        // Skip capture while paste operation is in progress
+        if is_pasting.load(Ordering::SeqCst) {
+            continue;
+        }
 
         let (content_type, content_bytes, hash) = match &clipboard_content {
             ClipboardContent::Text(t) => {

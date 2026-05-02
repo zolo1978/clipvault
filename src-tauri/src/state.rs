@@ -1,6 +1,9 @@
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::AtomicBool,
+    Arc, Mutex,
+};
 
 /// Application configuration persisted via tauri-plugin-store.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,6 +31,7 @@ pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     pub config: Arc<tokio::sync::RwLock<AppConfig>>,
     pub monitor: Arc<tokio::sync::Mutex<Option<crate::services::monitor_service::MonitorService>>>,
+    pub is_pasting: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -41,6 +45,7 @@ impl AppState {
             db: Arc::new(Mutex::new(conn)),
             config: Arc::new(tokio::sync::RwLock::new(AppConfig::default())),
             monitor: Arc::new(tokio::sync::Mutex::new(None)),
+            is_pasting: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -54,6 +59,7 @@ impl AppState {
             db: Arc::new(Mutex::new(conn)),
             config: Arc::new(tokio::sync::RwLock::new(AppConfig::default())),
             monitor: Arc::new(tokio::sync::Mutex::new(None)),
+            is_pasting: Arc::new(AtomicBool::new(false)),
         }
     }
 

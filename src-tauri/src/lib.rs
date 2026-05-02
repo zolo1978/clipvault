@@ -102,9 +102,10 @@ pub fn run() {
             let state = app.state::<AppState>();
             let db = state.db.clone();
             let config = state.config.clone();
+            let is_pasting = state.is_pasting.clone();
             let mut monitor = state.monitor.blocking_lock();
             let mut svc = services::monitor_service::MonitorService::new(
-                db, handle, config,
+                db, handle, config, is_pasting,
             );
             svc.start().expect("failed to start clipboard monitor");
             *monitor = Some(svc);
