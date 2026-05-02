@@ -1,0 +1,14 @@
+* text=auto
+*.rs text diff=rust
+*.ts text
+*.tsx text
+*.css text
+*.html text
+*.json text
+*.toml text
+*.yml text
+*.yaml text
+*.sql text
+*.png binary
+*.icns binary
+*.ico binary

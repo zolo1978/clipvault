@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "identifier": "default",
+  "description": "ClipVault default capabilities — minimal permission set for clipboard management",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "core:window:allow-set-title",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered",
+    "shell:allow-open",
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-delete",
+    "store:allow-keys",
+    "store:allow-values",
+    "store:allow-entries",
+    "store:allow-length",
+    "store:allow-load",
+    "store:allow-save"
+  ]
+}

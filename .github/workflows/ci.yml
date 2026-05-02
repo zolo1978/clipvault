@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.80"
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Type check frontend
+        run: npx tsc --noEmit
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt -- --check
+
+      - name: Run Rust clippy
+        working-directory: src-tauri
+        run: cargo clippy -- -D warnings
+
+      - name: Build Rust backend
+        working-directory: src-tauri
+        run: cargo build --release
