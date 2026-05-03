@@ -179,6 +179,35 @@ pub fn create_clip_with_preview(
     )
 }
 
+/// Create a sensitive clip. Content NOT stored in DB (empty blob).
+/// Actual content lives in SensitiveStore (memory only).
+pub fn create_sensitive_clip(
+    db: &Arc<Mutex<Connection>>,
+    content_type: ContentType,
+    content: &[u8],
+    masked_preview: &str,
+) -> Result<Clip, AppError> {
+    if content.is_empty() {
+        return Err(AppError::Validation("content must not be empty".into()));
+    }
+
+    let hash = compute_hash(content);
+    let id = uuid::Uuid::now_v7().to_string();
+    let created_at = now_ms();
+
+    let conn = db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    clip_repo::insert_sensitive_clip(
+        &conn,
+        &id,
+        content_type.as_str(),
+        masked_preview,
+        &hash,
+        created_at,
+    )
+}
+
 /// Search clips via FTS5.
 pub fn search(
     db: &Arc<Mutex<Connection>>,

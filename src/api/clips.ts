@@ -9,6 +9,7 @@ export interface ClipSummary {
   content_type: ContentType;
   preview: string;
   is_favorite: boolean;
+  is_sensitive: boolean;
   created_at: number;
 }
 
@@ -19,6 +20,7 @@ export interface Clip {
   preview: string;
   content_hash: string;
   is_favorite: boolean;
+  is_sensitive: boolean;
   created_at: number;
 }
 
@@ -33,6 +35,7 @@ export interface AppConfig {
   monitor_interval_ms: number;
   exclude_sources: string[];
   shortcut: string;
+  sensitive_detection_enabled: boolean;
 }
 
 export async function listClips(params: {
@@ -128,6 +131,14 @@ export async function quitApp(): Promise<void> {
 
 export async function startDrag(): Promise<void> {
   return safeInvoke<void>('start_drag');
+}
+
+export async function getSensitiveClipContent(id: string): Promise<string> {
+  return safeInvoke<string>('get_sensitive_clip_content', { id });
+}
+
+export async function checkSensitiveExpired(id: string): Promise<boolean> {
+  return safeInvoke<boolean>('check_sensitive_expired', { id });
 }
 
 export { IpcError };

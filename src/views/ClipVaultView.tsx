@@ -10,6 +10,8 @@ import {
   startDrag,
   viewImageClip,
   revealPath,
+  getSensitiveClipContent,
+  pasteClip,
 } from '../api/clips';
 import {
   Search,
@@ -28,6 +30,9 @@ import {
   Minus,
   Square,
   Eye,
+  EyeOff,
+  Lock,
+  Clock,
 } from 'lucide-react';
 
 function dataUriToBlob(dataUri: string): string {
@@ -140,6 +145,8 @@ export function ClipVaultView() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [snipping, setSnipping] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  const [revealedSensitive, setRevealedSensitive] = useState<Map<string, string>>(new Map());
+  const [expiredIds, setExpiredIds] = useState<Set<string>>(new Set());
   const listRef = useRef<HTMLUListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -167,12 +174,33 @@ export function ClipVaultView() {
     async (id: string) => {
       const clip = clips.find((c) => c.id === id);
       if (!clip || clip.content_type !== 'text') return;
+      if (clip.is_sensitive && expiredIds.has(id)) return;
       await paste(id);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 1500);
     },
-    [clips, paste],
+    [clips, paste, expiredIds],
   );
+
+  const handleRevealSensitive = useCallback(async (id: string) => {
+    try {
+      const content = await getSensitiveClipContent(id);
+      setRevealedSensitive((prev) => {
+        const next = new Map(prev);
+        next.set(id, content);
+        return next;
+      });
+      setTimeout(() => {
+        setRevealedSensitive((prev) => {
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 3000);
+    } catch {
+      setExpiredIds((prev) => new Set([...prev, id]));
+    }
+  }, []);
 
   const handleSnip = useCallback(async () => {
     try {
@@ -375,12 +403,20 @@ export function ClipVaultView() {
                 } ${idx < clips.length - 1 ? 'border-b border-neutral-100 dark:border-neutral-800/60' : ''}`}
                 onClick={() => setFocusIdx(idx)}
                 onDoubleClick={() => {
+                  if (clip.is_sensitive) {
+                    if (!expiredIds.has(clip.id)) handleRevealSensitive(clip.id);
+                    return;
+                  }
                   if (clip.content_type === 'text') handleCopy(clip.id);
                   else if (clip.content_type === 'image') viewImageClip(clip.id);
                   else if (clip.content_type === 'file_path') revealPath(clip.id);
                 }}
               >
-                <span className={`mt-1.5 shrink-0 h-2 w-2 rounded-full ${tc.dot}`} title={tc.label} />
+                {clip.is_sensitive ? (
+                  <Lock className="mt-1.5 shrink-0 h-3 w-3 text-red-400" />
+                ) : (
+                  <span className={`mt-1.5 shrink-0 h-2 w-2 rounded-full ${tc.dot}`} title={tc.label} />
+                )}
 
                 <div className="min-w-0 flex-1">
                   {clip.content_type === 'image' && clip.preview.startsWith('data:image/') ? (
@@ -390,15 +426,27 @@ export function ClipVaultView() {
                       className="max-h-24 rounded-md border border-neutral-100 dark:border-neutral-800 bg-checkerboard"
                       loading="lazy"
                     />
+                  ) : clip.is_sensitive ? (
+                  <div>
+                    <p className="text-[13px] leading-[1.5] text-neutral-700 dark:text-neutral-300 line-clamp-2">
+                      {revealedSensitive.has(clip.id) ? revealedSensitive.get(clip.id) : clip.preview}
+                    </p>
+                    {expiredIds.has(clip.id) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-500 mt-0.5">
+                        <Clock className="h-2.5 w-2.5" />
+                        已过期
+                      </span>
+                    )}
+                  </div>
                   ) : (
                   <p className="text-[13px] leading-[1.5] text-neutral-700 dark:text-neutral-300 line-clamp-2">
                     <HighlightText text={clip.preview} query={query} />
                   </p>
                   )}
                   <div className="flex items-center gap-2 mt-1">
-                    <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${tc.color}`}>
-                      {tc.icon}
-                      {tc.label}
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${clip.is_sensitive ? 'text-red-400' : tc.color}`}>
+                      {clip.is_sensitive ? <Lock className="h-2.5 w-2.5" /> : tc.icon}
+                      {clip.is_sensitive ? '敏感数据' : tc.label}
                     </span>
                     <span className="text-[10px] text-neutral-400 dark:text-neutral-600">
                       {formatTime(clip.created_at)}
@@ -407,7 +455,16 @@ export function ClipVaultView() {
                 </div>
 
                 <div className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                  {clip.content_type === 'image' && (
+                  {clip.is_sensitive && !expiredIds.has(clip.id) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleRevealSensitive(clip.id); }}
+                    aria-label="查看敏感内容"
+                    className="rounded-md p-1 text-neutral-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    {revealedSensitive.has(clip.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                  </button>
+                  )}
+                  {clip.content_type === 'image' && !clip.is_sensitive && (
                   <button
                     onClick={(e) => { e.stopPropagation(); viewImageClip(clip.id); }}
                     aria-label="查看图片"

@@ -39,6 +39,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arboard = "3"
 enigo = "0.2"
 core-graphics = "0.24"
+regex = "1"
+zeroize = { version = "1", features = ["derive"] }
 png = "0.17"
 
 [profile.release]

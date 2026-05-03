@@ -3,3 +3,4 @@
 
 pub mod clip_service;
 pub mod monitor_service;
+pub mod sensitive_store;

@@ -43,6 +43,7 @@ pub struct Clip {
     /// SHA-256 hex digest for dedup.
     pub content_hash: String,
     pub is_favorite: bool,
+    pub is_sensitive: bool,
     /// Unix timestamp in milliseconds.
     pub created_at: i64,
 }
@@ -54,6 +55,7 @@ pub struct ClipSummary {
     pub content_type: ContentType,
     pub preview: String,
     pub is_favorite: bool,
+    pub is_sensitive: bool,
     pub created_at: i64,
 }
 
@@ -80,6 +82,41 @@ pub struct CreateClipReq {
     pub content_type: ContentType,
     #[serde(with = "base64_bytes")]
     pub content: Vec<u8>,
+}
+
+/// Sensitivity classification from the detection pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Sensitivity {
+    Clean,
+    Sensitive(SensitiveKind),
+    Transient,
+}
+
+/// What kind of sensitive data was detected.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SensitiveKind {
+    ApiKey(String),
+    Jwt,
+    BearerToken,
+    PrivateKey,
+    ConnectionString,
+}
+
+impl SensitiveKind {
+    pub fn masked_preview(&self) -> String {
+        match self {
+            SensitiveKind::ApiKey(provider) => {
+                format!("API Key ({}) \u{2022}\u{2022}\u{2022}\u{2022}XXXX", provider)
+            }
+            SensitiveKind::Jwt => "JWT Token \u{2022}\u{2022}\u{2022}\u{2022}".into(),
+            SensitiveKind::BearerToken => "Bearer Token \u{2022}\u{2022}\u{2022}\u{2022}".into(),
+            SensitiveKind::PrivateKey => "Private Key (PEM) \u{2022}\u{2022}\u{2022}\u{2022}".into(),
+            SensitiveKind::ConnectionString => {
+                "Connection String \u{2022}\u{2022}\u{2022}\u{2022}".into()
+            }
+        }
+    }
 }
 
 /// Base64 serialization helper for Vec<u8> over IPC.

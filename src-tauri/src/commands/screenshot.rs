@@ -61,6 +61,7 @@ pub async fn snip_screen(
         content_type: clip.content_type,
         preview: clip.preview,
         is_favorite: clip.is_favorite,
+        is_sensitive: clip.is_sensitive,
         created_at: clip.created_at,
     };
     let _ = app_handle.emit("clip-created", &summary);

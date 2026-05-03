@@ -2,6 +2,7 @@ mod commands;
 mod error;
 mod models;
 mod repositories;
+mod sensitive;
 mod services;
 mod state;
 
@@ -103,9 +104,10 @@ pub fn run() {
             let db = state.db.clone();
             let config = state.config.clone();
             let is_pasting = state.is_pasting.clone();
+            let sensitive_store = state.sensitive_store.clone();
             let mut monitor = state.monitor.blocking_lock();
             let mut svc = services::monitor_service::MonitorService::new(
-                db, handle, config, is_pasting,
+                db, handle, config, is_pasting, sensitive_store,
             );
             svc.start().expect("failed to start clipboard monitor");
             *monitor = Some(svc);
@@ -126,6 +128,8 @@ pub fn run() {
             commands::clipboard::paste_clip,
             commands::clipboard::view_image_clip,
             commands::clipboard::reveal_path,
+            commands::clipboard::get_sensitive_clip_content,
+            commands::clipboard::check_sensitive_expired,
             commands::monitor::start_monitor,
             commands::monitor::stop_monitor,
             commands::monitor::monitor_status,

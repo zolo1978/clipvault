@@ -49,6 +49,7 @@ async fn do_paste(
 ) -> Result<(), AppError> {
     // 1. Read clip from DB
     let db = state.db.clone();
+    let id_for_store = id.clone();
     let clip = tokio::task::spawn_blocking(move || {
         clip_service::get_clip(&db, &id)?
             .ok_or_else(|| AppError::NotFound(format!("clip not found: {id}")))
@@ -61,31 +62,98 @@ async fn do_paste(
         return Err(AppError::Validation("only text paste is supported".into()));
     }
 
-    let text = String::from_utf8(clip.content)
-        .map_err(|e| AppError::Internal(format!("invalid utf8: {e}")))?;
+    let text = if clip.is_sensitive {
+        let mut store = state.sensitive_store.lock().await;
+        match store.get(&id_for_store) {
+            Some(crate::services::sensitive_store::EntryState::Available(content)) => {
+                String::from_utf8(content)
+                    .map_err(|e| AppError::Internal(format!("invalid utf8: {e}")))?
+            }
+            Some(crate::services::sensitive_store::EntryState::Expired) => {
+                return Err(AppError::Validation(
+                    "sensitive content has expired".into(),
+                ));
+            }
+            None => {
+                return Err(AppError::Validation(
+                    "sensitive content not available".into(),
+                ));
+            }
+        }
+    } else {
+        String::from_utf8(clip.content)
+            .map_err(|e| AppError::Internal(format!("invalid utf8: {e}")))?
+    };
 
-    // 2. Hide window so Cmd+V goes to the user's previous app
-    window
-        .hide()
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    eprintln!("[paste] clip_id={} content='{}' ({} bytes)", &id_for_store[..8], &text[..text.len().min(40)], text.len());
 
-    // 3. Wait for app focus switch
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-    // 4. Set clipboard to clip text
-    let text_clone = text.clone();
+    // 2. Set clipboard FIRST (while window still visible, avoids focus-switch race)
+    let text_for_cb = text.clone();
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
         let mut cb = arboard::Clipboard::new()
             .map_err(|e| AppError::Internal(format!("clipboard init: {e}")))?;
-        cb.set_text(&text_clone)
+        cb.set_text(&text_for_cb)
             .map_err(|e| AppError::Internal(format!("clipboard set: {e}")))?;
+        // Verify
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        match cb.get_text() {
+            Ok(read_back) if read_back == text_for_cb => {
+                eprintln!("[paste] clipboard verified OK ({} bytes)", text_for_cb.len());
+            }
+            Ok(other) => {
+                eprintln!(
+                    "[paste] WARNING: clipboard mismatch! expected {} bytes, got {} bytes",
+                    text_for_cb.len(),
+                    other.len(),
+                );
+            }
+            Err(e) => {
+                eprintln!("[paste] WARNING: clipboard read-back failed: {e}");
+            }
+        }
         Ok(())
     })
     .await
     .map_err(|e| AppError::Internal(e.to_string()))??;
 
-    // 5. Wait for clipboard to propagate
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // 3. NOW hide window — clipboard already has correct content
+    window
+        .hide()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // 4. Wait for app focus switch
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    // 5. Final clipboard check before simulating paste
+    let text_for_check = text.clone();
+    let check_result = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        let mut cb = arboard::Clipboard::new()
+            .map_err(|e| AppError::Internal(format!("clipboard init: {e}")))?;
+        cb.get_text()
+            .map_err(|e| AppError::Internal(format!("clipboard read: {e}")))
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))??;
+
+    if check_result != text_for_check {
+        eprintln!(
+            "[paste] CLIPBOARD CHANGED AFTER HIDE! expected '{}', got '{}' — re-setting",
+            &text_for_check[..text_for_check.len().min(30)],
+            &check_result[..check_result.len().min(30)],
+        );
+        // Re-set clipboard
+        let text_reset = text.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+            let mut cb = arboard::Clipboard::new()
+                .map_err(|e| AppError::Internal(format!("clipboard init: {e}")))?;
+            cb.set_text(&text_reset)
+                .map_err(|e| AppError::Internal(format!("clipboard re-set: {e}")))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))??;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 
     // 6. Simulate Cmd+V
     simulate_paste().await?;
@@ -94,6 +162,35 @@ async fn do_paste(
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_sensitive_clip_content(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<String, AppError> {
+    let mut store = state.sensitive_store.lock().await;
+    match store.get(&id) {
+        Some(crate::services::sensitive_store::EntryState::Available(content)) => {
+            String::from_utf8(content)
+                .map_err(|e| AppError::Internal(format!("invalid utf8: {e}")))
+        }
+        Some(crate::services::sensitive_store::EntryState::Expired) => {
+            Err(AppError::Validation("sensitive content has expired".into()))
+        }
+        None => Err(AppError::NotFound(format!(
+            "sensitive content not found: {id}"
+        ))),
+    }
+}
+
+#[tauri::command]
+pub async fn check_sensitive_expired(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, AppError> {
+    let store = state.sensitive_store.lock().await;
+    Ok(store.is_expired(&id))
 }
 
 #[tauri::command]

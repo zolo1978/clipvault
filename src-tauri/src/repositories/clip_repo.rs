@@ -16,7 +16,8 @@ fn row_to_clip(row: &rusqlite::Row<'_>) -> rusqlite::Result<Clip> {
         preview: row.get(3)?,
         content_hash: row.get(4)?,
         is_favorite: row.get::<_, i32>(5)? != 0,
-        created_at: row.get(6)?,
+        is_sensitive: row.get::<_, i32>(6)? != 0,
+        created_at: row.get(7)?,
     })
 }
 
@@ -27,11 +28,15 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipSummary> {
             .unwrap_or(ContentType::Text),
         preview: row.get(2)?,
         is_favorite: row.get::<_, i32>(3)? != 0,
-        created_at: row.get(4)?,
+        is_sensitive: row.get::<_, i32>(4)? != 0,
+        created_at: row.get(5)?,
     })
 }
 
 // -- Public API --
+
+const CLIP_COLUMNS: &str = "id, content_type, content, preview, content_hash, is_favorite, is_sensitive, created_at";
+const SUMMARY_COLUMNS: &str = "id, content_type, preview, is_favorite, is_sensitive, created_at";
 
 /// Insert a new clip. If content_hash already exists (dedup), return the existing record.
 pub fn insert_clip(
@@ -44,18 +49,14 @@ pub fn insert_clip(
     created_at: i64,
 ) -> Result<Clip, AppError> {
     let changed = conn.execute(
-        "INSERT OR IGNORE INTO clips \
-         (id, content_type, content, preview, content_hash, is_favorite, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+        &format!("INSERT OR IGNORE INTO clips ({}) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6)", CLIP_COLUMNS),
         params![id, content_type, content, preview, content_hash, created_at],
     )?;
 
     if changed == 0 {
-        // Duplicate — return existing record
         return conn
             .query_row(
-                "SELECT id, content_type, content, preview, content_hash, is_favorite, created_at \
-                 FROM clips WHERE content_hash = ?1",
+                &format!("SELECT {} FROM clips WHERE content_hash = ?1 AND is_sensitive = 0", CLIP_COLUMNS),
                 params![content_hash],
                 row_to_clip,
             )
@@ -69,6 +70,34 @@ pub fn insert_clip(
         preview: preview.to_string(),
         content_hash: content_hash.to_string(),
         is_favorite: false,
+        is_sensitive: false,
+        created_at,
+    })
+}
+
+/// Insert a sensitive clip. Content BLOB is empty. is_sensitive = 1. No dedup.
+pub fn insert_sensitive_clip(
+    conn: &Connection,
+    id: &str,
+    content_type: &str,
+    masked_preview: &str,
+    content_hash: &str,
+    created_at: i64,
+) -> Result<Clip, AppError> {
+    let empty_content: Vec<u8> = Vec::new();
+    conn.execute(
+        &format!("INSERT INTO clips ({}) VALUES (?1, ?2, ?3, ?4, ?5, 0, 1, ?6)", CLIP_COLUMNS),
+        params![id, content_type, empty_content, masked_preview, content_hash, created_at],
+    )?;
+
+    Ok(Clip {
+        id: id.to_string(),
+        content_type: ContentType::from_str(content_type).unwrap_or(ContentType::Text),
+        content: Vec::new(),
+        preview: masked_preview.to_string(),
+        content_hash: content_hash.to_string(),
+        is_favorite: false,
+        is_sensitive: true,
         created_at,
     })
 }
@@ -80,9 +109,7 @@ pub fn list_clips(
     offset: u32,
     content_type: Option<&str>,
 ) -> Result<Vec<ClipSummary>, AppError> {
-    let mut sql = String::from(
-        "SELECT id, content_type, preview, is_favorite, created_at FROM clips",
-    );
+    let mut sql = format!("SELECT {} FROM clips", SUMMARY_COLUMNS);
     let mut param_boxed: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ct) = content_type {
@@ -112,7 +139,6 @@ pub fn search_clips(
     content_type: Option<&str>,
     limit: u32,
 ) -> Result<Vec<ClipSummary>, AppError> {
-    // Strip FTS5 operators, keep only literal chars for safe phrase matching
     let sanitized: String = query
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-')
@@ -123,11 +149,15 @@ pub fn search_clips(
     }
     let fts_query = format!("\"{}\"*", trimmed.replace('"', "\"\""));
 
-    let mut sql = String::from(
-        "SELECT c.id, c.content_type, c.preview, c.is_favorite, c.created_at \
-         FROM clips c \
+    let mut sql = format!(
+        "SELECT c.{} FROM clips c \
          JOIN clips_fts f ON f.rowid = c.rowid \
          WHERE clips_fts MATCH ?",
+        SUMMARY_COLUMNS
+            .split(", ")
+            .map(|c| format!("c.{}", c))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     let mut param_boxed: Vec<Box<dyn rusqlite::types::ToSql>> =
         vec![Box::new(fts_query)];
@@ -154,8 +184,7 @@ pub fn search_clips(
 /// Get a single clip by ID. Returns None if not found.
 pub fn get_clip(conn: &Connection, id: &str) -> Result<Option<Clip>, AppError> {
     let result = conn.query_row(
-        "SELECT id, content_type, content, preview, content_hash, is_favorite, created_at \
-         FROM clips WHERE id = ?1",
+        &format!("SELECT {} FROM clips WHERE id = ?1", CLIP_COLUMNS),
         params![id],
         row_to_clip,
     );
@@ -186,7 +215,7 @@ pub fn toggle_favorite(
         return Ok(None);
     }
     let summary = conn.query_row(
-        "SELECT id, content_type, preview, is_favorite, created_at FROM clips WHERE id = ?1",
+        &format!("SELECT {} FROM clips WHERE id = ?1", SUMMARY_COLUMNS),
         params![id],
         row_to_summary,
     )?;
@@ -206,9 +235,7 @@ pub fn purge_old(
         .as_millis() as i64;
 
     if let Some(days) = keep_days {
-        if days == 0 {
-            // keep_days: 0 means no time-based purge
-        } else {
+        if days > 0 {
             let cutoff_ms = now_ms - (days as i64 * 24 * 3600 * 1000);
             let rows = conn.execute(
                 "DELETE FROM clips WHERE is_favorite = 0 AND created_at < ?1",
