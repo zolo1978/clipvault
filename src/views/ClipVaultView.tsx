@@ -11,7 +11,6 @@ import {
   viewImageClip,
   revealPath,
   getSensitiveClipContent,
-  pasteClip,
 } from '../api/clips';
 import {
   Search,
